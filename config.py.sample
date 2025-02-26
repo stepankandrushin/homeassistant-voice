@@ -21,23 +21,38 @@ SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2  # 16-bit audio (S16_LE)
 CHANNELS = 1
 
-# Commands configuration
-# Each command has:
-# - command: The primary command text
-# - aliases: Alternative phrasings or translations
-# - entity_id: The Home Assistant entity ID to control
-# - action: The action to perform (e.g. "turn_on", "turn_off")
-commands = [
-    {
-        "command": "turn on ac",
-        "aliases": ["turn on air conditioner", "turn on aircon"],
-        "entity_id": "climate.faikin_office_mqtt_hvac",
-        "action": "turn_on"
-    },
-    {
-        "command": "turn off ac",
-        "aliases": ["turn off air conditioner", "turn off aircon"],
-        "entity_id": "climate.faikin_office_mqtt_hvac",
-        "action": "turn_off"
+# Commands configuration with separate aliases for actions, devices, and rooms
+
+# Action aliases (turn on/off)
+action_aliases = {
+    "turn_on": ["turn on", "enable", "start", "switch on"],
+    "turn_off": ["turn off", "disable", "stop", "switch off"]
+}
+
+# Device aliases
+device_aliases = {
+    "ac": ["ac", "air conditioner", "air conditioning", "aircon"],
+    # Add more devices as needed
+    # "light": ["light", "lamp"],
+    # "tv": ["tv", "television"]
+}
+
+# Room aliases
+room_aliases = {
+    "office": ["office", "study"],
+    # Add more rooms as needed
+    # "bedroom": ["bedroom"],
+    # "living_room": ["living room", "lounge"]
+}
+
+# Default room if not specified
+default_room = "office"
+
+# Device to entity mapping
+device_entities = {
+    "ac": {
+        "office": "climate.faikin_office_mqtt_hvac",
+        # Add more rooms as needed
+        # "bedroom": "climate.bedroom_ac",
     }
-]
+}
