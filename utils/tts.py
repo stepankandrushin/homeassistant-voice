@@ -14,8 +14,10 @@ def play_tts_response(text):
         bool: True if successful, False otherwise
     """
     try:
+        optimized_text = text
+
         # Prepare the JSON data for the TTS API
-        json_data = json.dumps({"text": text, "format": "wav", "streaming": "True", "seed": 1})
+        json_data = json.dumps({"text": optimized_text, "format": "wav", "streaming": "True", "seed": 1})
         
         # Construct the curl command
         curl_cmd = [
