@@ -2,7 +2,9 @@
 import subprocess
 import json
 import config
+from utils.timing import time_execution
 
+@time_execution(label="Playing and making request to TTS")
 def play_tts_response(text):
     """
     Convert text to speech using the TTS API and play it.
