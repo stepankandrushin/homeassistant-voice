@@ -4,10 +4,13 @@
 # Whisper API configuration
 # All config options in def transcribe_file in
 # https://github.com/speaches-ai/speaches/blob/master/src/speaches/routers/stt.py
-model = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
-prompt = "turn on turn off the light in the office"
-language = "en"
-response_format = "text"
+Whisper = {
+    "model": "large-v3",
+    "response_format": "verbose_json",
+    "prompt": "",
+    "language": "en",
+    "vad_filter": False,
+}
 server_url = "http://192.168.1.65:8000"
 
 # Home Assistant configuration
