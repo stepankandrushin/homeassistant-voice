@@ -26,6 +26,15 @@ code.
 - `send_homeassistant_command(entity_id, service)` accepts either a string
   or a list of entity IDs sharing a domain; `config.room_entities` may map
   a device to a list when one logical command should hit several entities.
+- **Config over code in command routing.** Before adding any branch to
+  `utils/homeassistant.py::process_command`, check whether the behavior falls
+  out of (a) a new `room_aliases` alias, (b) a `room_entities` entry (single
+  ID, list, or per-action dict), or (c) a virtual room combining the two.
+  Only reach for code when the config model genuinely can't express it — the
+  user explicitly pushed back on an `everywhere_aliases` code path because
+  the same behavior fell out of existing room-match + list fan-out; they want
+  the command-routing kernel to stay small, with capability growing via
+  config. The two bullets below are instances of this rule.
 - A `room_entities[room][device]` value may also be a `{action: entity(s)}`
   dict when one action should target a different set than another (e.g. the
   pool `light` whose `turn_off` also kills the jacuzzi while `turn_on`
