@@ -331,7 +331,7 @@ The room is optional if the device is configured in `devices_without_room`.
 ### Audio Issues
 
 - Make sure your microphone is properly connected and configured
-- Adjust the `DB_THRESHOLD` value in `config.py` if speech detection is too sensitive or not sensitive enough
+- Adjust the `DB_THRESHOLD` value in `config.py` if speech detection is too sensitive or not sensitive enough. With several mics, override it per source via `source_db_thresholds` (a few dB above each mic's idle noise floor)
 - Check the ALSA/PulseAudio configuration in `config.py` to match your system
 
 ### Transcription Issues

@@ -5,7 +5,8 @@ Voice control for Home Assistant: capture audio → detect speech → transcribe
 
 Entry point: `main.py`. Each audio input runs in its own `SpeechSource`
 thread that spawns a subprocess writing raw s16le to stdout, detects speech
-by dB threshold, transcribes the utterance, and pushes the result onto a
+by dB threshold (global `DB_THRESHOLD`, per-mic override in
+`config.source_db_thresholds`), transcribes the utterance, and pushes the result onto a
 shared queue. The main loop reads from the queue, matches commands via
 `utils.homeassistant.process_command`, and dedupes repeated commands (same
 entity + action) inside `DEDUPE_WINDOW_SEC` (default 2 s) so two mics in

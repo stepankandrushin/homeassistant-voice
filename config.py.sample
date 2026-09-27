@@ -84,6 +84,14 @@ default_room = "office"
 #     "cam201": "terrace",
 # }
 
+# Per-source speech threshold in dB (keyed like source_rooms), overriding
+# DB_THRESHOLD. Set it a few dB above the mic's idle noise floor — a mic whose
+# floor sits above its threshold never detects silence, so one "utterance"
+# swallows minutes of audio.
+# source_db_thresholds = {
+#     "cam204": 62,
+# }
+
 # Devices that can be called without specifying a room
 # These devices will be searched across all rooms
 devices_without_room = ["ac"]

@@ -74,6 +74,9 @@ class SpeechSource(Thread):
         self.chunk_samples = int(config.SAMPLE_RATE * chunk_duration)
         self.chunk_size = self.chunk_samples * config.SAMPLE_WIDTH
         self.preroll_maxlen = max(1, int(config.PREROLL_DURATION_SEC / chunk_duration))
+        # Mics differ in gain and ambient noise; a threshold below a mic's noise
+        # floor never sees silence, so each source may override the global one.
+        self.db_threshold = getattr(config, "source_db_thresholds", {}).get(name, config.DB_THRESHOLD)
         self.stop_event = Event()
         self.process = None
         self.last_chunk_time = time.time()
@@ -91,7 +94,7 @@ class SpeechSource(Thread):
             self.last_chunk_time = time.time()
 
     def _run_once(self):
-        print(f"[{self.source_name}] starting audio source")
+        print(f"[{self.source_name}] starting audio source (threshold {self.db_threshold} dB)")
         try:
             self.process = subprocess.Popen(
                 self.cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -117,7 +120,7 @@ class SpeechSource(Thread):
                 db = audio.db_from_rms(audio.rms_from_samples(samples))
                 now = self.last_chunk_time
 
-                if db >= config.DB_THRESHOLD:
+                if db >= self.db_threshold:
                     if not is_recording:
                         print(f"[{self.source_name}] speech detected ({db:.1f} dB)")
                         is_recording = True
@@ -256,7 +259,7 @@ def main():
     running_as_service = is_running_as_service()
     print("Speech Detection and Transcription System")
     print("Running as a systemd service" if running_as_service else "Running as a standalone application")
-    print(f"Speech threshold: {config.DB_THRESHOLD} dB, Silence threshold: {config.SILENCE_THRESHOLD_MS} ms")
+    print(f"Default speech threshold: {config.DB_THRESHOLD} dB, Silence threshold: {config.SILENCE_THRESHOLD_MS} ms")
     print(f"Dedupe window: {DEDUPE_WINDOW_SEC} s")
 
     result_queue = Queue()
