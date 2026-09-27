@@ -56,3 +56,29 @@ def transcribe(audio_input):
     finally:
         if isinstance(audio_input, str):
             files["audio"].close()  # Make sure to close the file if it was opened
+
+
+def transcribe_batch(clips):
+    """
+    Transcribe several raw PCM clips (s16le, SAMPLE_RATE, mono) in one request
+    to the server's /transcribe_batch endpoint.
+
+    Returns a list of texts in the order of `clips`, or None if the request
+    failed. Not timed/logged per call: window mode sends a batch every
+    WINDOW_HOP_SEC.
+    """
+    url = getattr(config, "TRANSCRIPTION_BATCH_API_URL", config.TRANSCRIPTION_API_URL + "_batch")
+    files = [
+        ("audio", (f"clip{i}.wav", wrap_raw_pcm_as_wav(clip, sample_rate=config.SAMPLE_RATE), "audio/wav"))
+        for i, clip in enumerate(clips)
+    ]
+    try:
+        response = requests.post(url, files=files, timeout=10)
+        response.raise_for_status()
+        texts = response.json()["texts"]
+        if len(texts) != len(clips):
+            raise ValueError(f"sent {len(clips)} clips, got {len(texts)} texts")
+        return texts
+    except Exception as e:
+        print(f"Batch transcription error: {e}")
+        return None

@@ -5,7 +5,7 @@ A voice-controlled system for Home Assistant that listens for spoken commands, t
 ## Features
 
 - **Continuous Audio Monitoring**: Listens for speech using any process that writes raw s16le to stdout (local `arecord`/`parecord` or `ffmpeg` from an RTSP camera)
-- **Speech Detection**: Automatically detects when someone is speaking based on volume threshold
+- **Speech Detection**: Automatically detects when someone is speaking based on volume threshold (VAD mode), or skips detection and continuously transcribes a sliding window of every mic (window mode) — see below
 - **Speech-to-Text**: Transcribes spoken commands via a pluggable HTTP API (transcription_api or Whisper)
 - **Command Processing**: Parses transcribed text to identify actions, devices, and rooms
 - **Home Assistant Integration**: Sends commands to Home Assistant via its REST API, with support for toggling multiple entities in a single call
@@ -97,6 +97,44 @@ DB_THRESHOLD = 50  # Speech detection threshold in dB
 SILENCE_THRESHOLD_MS = 500  # Silence duration threshold in ms
 MIN_RECORDING_LENGTH_SEC = 1.0  # Minimum recording length to process
 ```
+
+### Window mode (noisy mics)
+
+With `STT_MODE = "vad"` (the default) an utterance is cut out when the level
+crosses `DB_THRESHOLD` and transcribed once. When a mic's noise floor sits
+close to speech level (a fan, a far camera), quieter syllables fall below the
+threshold and phrases get chopped (`turn on` | `the light`), so commands are missed.
+
+`STT_MODE = "window"` drops the threshold: each mic keeps its last
+`WINDOW_SEC` of audio, and every `WINDOW_HOP_SEC` the last window of every
+mic goes to the transcription server in **one batch** (`/transcribe_batch`,
+transcription_api only). A spoken command lands whole in several
+consecutive windows, so a bad cut or a misheard window no longer loses it.
+
+```python
+STT_MODE = "window"
+WINDOW_SEC = 5.0           # audio per window; must fit your longest command
+WINDOW_HOP_SEC = 0.5       # how often every mic is re-transcribed
+WINDOW_STABLE_COUNT = 2    # consecutive agreeing windows before a command fires
+# TRANSCRIPTION_BATCH_API_URL defaults to TRANSCRIPTION_API_URL + "_batch"
+```
+
+Each utterance executes once (`utils/window.py`, tests in `tests/test_window.py`):
+
+- a command fires only when `WINDOW_STABLE_COUNT` consecutive windows from a
+  mic parse to the same entity + action **and the text didn't grow** — so
+  "turn off the light" isn't acted on while "…in the electrical room" is still being said;
+- once it fires, the audio every mic has buffered so far is discarded, so
+  neither that mic nor another mic that heard the same words acts on them
+  again (one utterance, one action — even when two mics with different
+  default rooms heard it);
+- the same entity + action is deduped across mics for
+  `max(DEDUPE_WINDOW_SEC, WINDOW_SEC)` as a backstop for a lagging stream.
+
+Latency from the end of a phrase to the HA call is roughly one to two hops
+(0.5–1 s). Window mode handles Home Assistant commands only — the AI
+wake-word branch needs whole utterances, which only VAD mode produces.
+Transcript logs record a mic's window text only when it changes.
 
 ### Command Configuration
 
@@ -332,6 +370,7 @@ The room is optional if the device is configured in `devices_without_room`.
 
 - Make sure your microphone is properly connected and configured
 - Adjust the `DB_THRESHOLD` value in `config.py` if speech detection is too sensitive or not sensitive enough. With several mics, override it per source via `source_db_thresholds` (a few dB above each mic's idle noise floor)
+- If a mic's noise floor is too close to speech level for any threshold to work, switch to `STT_MODE = "window"` (see Window mode)
 - Check the ALSA/PulseAudio configuration in `config.py` to match your system
 
 ### Transcription Issues

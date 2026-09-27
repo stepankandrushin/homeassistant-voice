@@ -10,7 +10,16 @@ by dB threshold (global `DB_THRESHOLD`, per-mic override in
 shared queue. The main loop reads from the queue, matches commands via
 `utils.homeassistant.process_command`, and dedupes repeated commands (same
 entity + action) inside `DEDUPE_WINDOW_SEC` (default 2 s) so two mics in
-the same room don't trigger twice.
+the same room don't trigger twice. That is VAD mode (`STT_MODE = "vad"`,
+the default).
+
+In window mode (`STT_MODE = "window"`) there is no
+threshold: the threads only fill a `WINDOW_SEC` ring buffer, and the main
+loop sends every mic's window to the transcription server's
+`/transcribe_batch` every `WINDOW_HOP_SEC`.
+`utils/window.py::WindowCommander` guarantees one execution per utterance
+(stable-window rule, discard-all-mics on fire, cross-mic dedupe). Any change
+there must keep `tests/test_window.py` passing.
 
 Configure one or many sources via `config.AUDIO_RECORD_CMD` (single) or
 `config.AUDIO_RECORD_CMDS` (list of commands, or dict `{name: cmd}` for

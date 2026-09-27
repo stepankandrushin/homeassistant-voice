@@ -18,6 +18,17 @@ SILENCE_THRESHOLD_MS = 500  # Default silence duration threshold in ms
 MIN_RECORDING_LENGTH_SEC = 1.0  # Minimum recording length to process
 PREROLL_DURATION_SEC = 0.5  # Duration of audio to include before speech detection (in seconds)
 
+# Speech-to-command mode (see README "Window mode"):
+#   "vad"    — cut utterances by DB_THRESHOLD, transcribe each once (default)
+#   "window" — no threshold: every WINDOW_HOP_SEC transcribe the last WINDOW_SEC
+#              of every mic in one batch. Needs transcription_api's
+#              /transcribe_batch. Home Assistant commands only (no AI branch).
+STT_MODE = "vad"
+WINDOW_SEC = 5.0  # audio per window; must fit the longest command
+WINDOW_HOP_SEC = 0.5  # how often every mic is re-transcribed
+WINDOW_STABLE_COUNT = 2  # consecutive agreeing windows before a command fires
+# TRANSCRIPTION_BATCH_API_URL = "http://192.168.1.65:8889/transcribe_batch"  # default: TRANSCRIPTION_API_URL + "_batch"
+
 # Path to sound file played after command execution or blank for no sound
 HOMEASSISTANT_SOUND = "sounds/homeassistant.wav"
 AI_SOUND = "sounds/ai.wav"

@@ -45,6 +45,11 @@ def send_homeassistant_command(entity_id, service):
 
 @time_execution(label="Check if it's HomeAssistant command")
 def process_command(transcript, source_name=None):
+    """Match a transcript to a command, logging each matching step. See match_command."""
+    return match_command(transcript, source_name)
+
+
+def match_command(transcript, source_name=None, log=print):
     """
     Process the transcribed text to check if it matches action, device, and room aliases.
     If matches are found, identify the entity_id and action for the command.
@@ -54,6 +59,8 @@ def process_command(transcript, source_name=None):
         source_name (str, optional): Name of the audio source the transcript came
             from. If `config.source_rooms` maps it to a room, that room is used
             as the default when the utterance doesn't name a room.
+        log (callable, optional): Receives each matching step as a message.
+            Window mode passes a no-op: it matches several transcripts a second.
 
     Returns:
         tuple: (success, entity_id, action)
@@ -67,7 +74,7 @@ def process_command(transcript, source_name=None):
     # Check if we have the necessary configuration
     required_attrs = ['action_aliases', 'device_aliases', 'room_entities', 'default_room']
     if not all(hasattr(config, attr) for attr in required_attrs):
-        print("Missing required configuration attributes")
+        log("Missing required configuration attributes")
         return False, None, None
     
     # Convert transcript to lowercase for case-insensitive matching
@@ -78,11 +85,11 @@ def process_command(transcript, source_name=None):
     for action_name, aliases in config.action_aliases.items():
         if any(alias in transcript for alias in aliases):
             action = action_name
-            print(f"Action recognized: {action}")
+            log(f"Action recognized: {action}")
             break
     
     if not action:
-        print("No action recognized in transcript")
+        log("No action recognized in transcript")
         return False, None, None
     
     # Find device in transcript
@@ -90,11 +97,11 @@ def process_command(transcript, source_name=None):
     for device_name, aliases in config.device_aliases.items():
         if any(alias in transcript for alias in aliases):
             device = device_name
-            print(f"Device recognized: {device}")
+            log(f"Device recognized: {device}")
             break
     
     if not device:
-        print("No device recognized in transcript")
+        log("No device recognized in transcript")
         return False, None, None
     
     # Find room in transcript (optional)
@@ -105,7 +112,7 @@ def process_command(transcript, source_name=None):
         if any(alias in transcript for alias in aliases):
             room = room_name
             room_specified = True
-            print(f"Room recognized: {room}")
+            log(f"Room recognized: {room}")
             break
     
     # Check if this device can be used without specifying a room
@@ -116,16 +123,16 @@ def process_command(transcript, source_name=None):
             if device in devices:
                 entity_id = devices[device]
                 room = search_room
-                print(f"Found {device} in {room} without room specification")
+                log(f"Found {device} in {room} without room specification")
                 break
         
         if entity_id is None:
-            print(f"No entity found for {device} in any room")
+            log(f"No entity found for {device} in any room")
             return False, None, None
     else:
         # Get entity ID for the device in the specified room
         if room not in config.room_entities or device not in config.room_entities[room]:
-            print(f"No entity found for {device} in {room}")
+            log(f"No entity found for {device} in {room}")
             return False, None, None
         
         entity_id = config.room_entities[room][device]
@@ -140,10 +147,10 @@ def process_command(transcript, source_name=None):
         elif 'default' in entity_id:
             entity_id = entity_id['default']
         else:
-            print(f"No entities mapped for action '{action}' on {device} in {room}")
+            log(f"No entities mapped for action '{action}' on {device} in {room}")
             return False, None, None
 
-    print(f"Executing action: {action} on {entity_id} in {room}")
+    log(f"Executing action: {action} on {entity_id} in {room}")
     
     # No longer sending the command here, as it will be sent from main.py
     # Return the values for main.py to use

@@ -17,6 +17,7 @@ from utils import stt
 from utils import tts
 from utils import homeassistant
 from utils import ai
+from utils import window
 
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -30,6 +31,13 @@ TRANSCRIPTS_DIR = getattr(config, "TRANSCRIPTS_DIR", "transcripts")
 STALE_CHUNK_TIMEOUT_SEC = getattr(config, "STALE_CHUNK_TIMEOUT_SEC", 30.0)
 SUBPROCESS_RESTART_DELAY_SEC = 2.0
 WATCHDOG_NOTIFY_INTERVAL_SEC = 5.0
+# "vad": cut utterances by dB threshold and transcribe each once.
+# "window": transcribe every mic's last WINDOW_SEC every WINDOW_HOP_SEC in one
+# batch, no threshold — see utils/window.py.
+STT_MODE = getattr(config, "STT_MODE", "vad")
+WINDOW_SEC = getattr(config, "WINDOW_SEC", 5.0)
+WINDOW_HOP_SEC = getattr(config, "WINDOW_HOP_SEC", 0.5)
+WINDOW_STABLE_COUNT = getattr(config, "WINDOW_STABLE_COUNT", 2)
 
 
 def sd_notify(message):
@@ -64,9 +72,13 @@ class SpeechSource(Thread):
     with pre-roll, transcribes it, and pushes (source_name, ts, transcript)
     onto a shared result queue. Runs one instance per microphone so that
     multiple sources are processed concurrently.
+
+    With `window_bytes` set (window mode) it does no detection: it only
+    keeps the last `window_bytes` of audio in `self.window` for the main
+    loop to transcribe.
     """
 
-    def __init__(self, name, cmd, result_queue, chunk_duration=0.05):
+    def __init__(self, name, cmd, result_queue, chunk_duration=0.05, window_bytes=None):
         super().__init__(daemon=True, name=f"SpeechSource[{name}]")
         self.source_name = name
         self.cmd = cmd
@@ -77,6 +89,7 @@ class SpeechSource(Thread):
         # Mics differ in gain and ambient noise; a threshold below a mic's noise
         # floor never sees silence, so each source may override the global one.
         self.db_threshold = getattr(config, "source_db_thresholds", {}).get(name, config.DB_THRESHOLD)
+        self.window = window.AudioWindow(window_bytes) if window_bytes else None
         self.stop_event = Event()
         self.process = None
         self.last_chunk_time = time.time()
@@ -94,7 +107,12 @@ class SpeechSource(Thread):
             self.last_chunk_time = time.time()
 
     def _run_once(self):
-        print(f"[{self.source_name}] starting audio source (threshold {self.db_threshold} dB)")
+        if self.window is not None:
+            print(f"[{self.source_name}] starting audio source")
+            # Don't splice audio from before a stream restart onto what follows it
+            self.window.reset()
+        else:
+            print(f"[{self.source_name}] starting audio source (threshold {self.db_threshold} dB)")
         try:
             self.process = subprocess.Popen(
                 self.cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -115,6 +133,9 @@ class SpeechSource(Thread):
                     print(f"[{self.source_name}] audio stream ended")
                     break
                 self.last_chunk_time = time.time()
+                if self.window is not None:
+                    self.window.append(chunk)
+                    continue
 
                 samples = np.frombuffer(chunk, dtype=np.int16)
                 db = audio.db_from_rms(audio.rms_from_samples(samples))
@@ -196,13 +217,6 @@ def get_audio_sources():
     return [("mic", config.AUDIO_RECORD_CMD)]
 
 
-def entity_key(entity_id):
-    """Hashable key for dedupe — tuples for lists, strings pass through."""
-    if isinstance(entity_id, (list, tuple)):
-        return tuple(entity_id)
-    return entity_id
-
-
 def is_running_as_service():
     return "INVOCATION_ID" in os.environ or "JOURNAL_STREAM" in os.environ
 
@@ -252,6 +266,61 @@ def systemd_watchdog_pinger(stop_event):
         sd_notify("WATCHDOG=1")
 
 
+def run_window_mode(sources):
+    """Every WINDOW_HOP_SEC, transcribe the last WINDOW_SEC of every mic in one
+    batch and execute what WindowCommander accepts. Never returns.
+
+    Home Assistant commands only — the AI wake-word branch needs whole
+    utterances, which only VAD mode produces.
+    """
+    # Another mic can still hold (part of) an executed phrase for up to a
+    # window length, so dedupe at least that long.
+    commander = window.WindowCommander(
+        lambda text, name: homeassistant.match_command(text, name, log=lambda _msg: None),
+        stable_count=WINDOW_STABLE_COUNT,
+        dedupe_sec=max(DEDUPE_WINDOW_SEC, WINDOW_SEC),
+    )
+    by_name = {s.source_name: s for s in sources}
+    min_bytes = int(config.MIN_RECORDING_LENGTH_SEC * config.SAMPLE_RATE) * config.SAMPLE_WIDTH
+    last_logged = {}
+    next_round = time.monotonic()
+    while True:
+        snaps = [(s.source_name, *s.window.snapshot()) for s in sources]
+        ready = [i for i, (_, pcm, _) in enumerate(snaps) if len(pcm) >= min_bytes]
+        texts = [""] * len(snaps)
+        if ready:
+            batch = stt.transcribe_batch([snaps[i][1] for i in ready])
+            for i, text in zip(ready, batch or []):
+                texts[i] = (text or "").strip()
+
+        now = time.time()
+        for (name, _, _), text in zip(snaps, texts):
+            # Consecutive windows overlap, so log only what changed
+            if text and text != last_logged.get(name):
+                last_logged[name] = text
+                print(f"[{name}] window: {text}")
+                append_transcript(name, now, text)
+
+        commands, discards = commander.process_round(
+            [(name, text, end) for (name, _, end), text in zip(snaps, texts)], now
+        )
+        for name, pos in discards.items():
+            by_name[name].window.discard_until(pos)
+        for name, entity_id, action, text in commands:
+            print(f"[{name}] command: {action} {entity_id} (heard: {text})")
+            audio.play_audio(config.HOMEASSISTANT_SOUND)
+            homeassistant.send_homeassistant_command(entity_id, action)
+
+        next_round += WINDOW_HOP_SEC
+        delay = next_round - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        else:
+            # A slow round (e.g. HA took seconds): start the next one now
+            # rather than firing a burst of rounds to catch up.
+            next_round = time.monotonic()
+
+
 def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -259,12 +328,21 @@ def main():
     running_as_service = is_running_as_service()
     print("Speech Detection and Transcription System")
     print("Running as a systemd service" if running_as_service else "Running as a standalone application")
-    print(f"Default speech threshold: {config.DB_THRESHOLD} dB, Silence threshold: {config.SILENCE_THRESHOLD_MS} ms")
-    print(f"Dedupe window: {DEDUPE_WINDOW_SEC} s")
+    window_mode = STT_MODE == "window"
+    if window_mode:
+        print(
+            f"Window mode: last {WINDOW_SEC} s of every mic every {WINDOW_HOP_SEC} s, "
+            f"{WINDOW_STABLE_COUNT} matching windows to fire, "
+            f"dedupe window {max(DEDUPE_WINDOW_SEC, WINDOW_SEC)} s"
+        )
+    else:
+        print(f"Default speech threshold: {config.DB_THRESHOLD} dB, Silence threshold: {config.SILENCE_THRESHOLD_MS} ms")
+        print(f"Dedupe window: {DEDUPE_WINDOW_SEC} s")
+    window_bytes = int(WINDOW_SEC * config.SAMPLE_RATE) * config.SAMPLE_WIDTH if window_mode else None
 
     result_queue = Queue()
     for name, cmd in get_audio_sources():
-        src = SpeechSource(name, cmd, result_queue)
+        src = SpeechSource(name, cmd, result_queue, window_bytes=window_bytes)
         src.start()
         sources.append(src)
     print(f"Started {len(sources)} audio source(s): {', '.join(s.source_name for s in sources)}")
@@ -280,6 +358,8 @@ def main():
     last_executed = {}
 
     try:
+        if window_mode:
+            run_window_mode(sources)
         while True:
             try:
                 source_name, ts, transcript = result_queue.get(timeout=1.0)
@@ -288,7 +368,7 @@ def main():
 
             success, entity_id, action = homeassistant.process_command(transcript, source_name)
             if success:
-                key = (entity_key(entity_id), action)
+                key = (window.entity_key(entity_id), action)
                 now = time.time()
                 prev = last_executed.get(key)
                 if prev is not None and (now - prev) < DEDUPE_WINDOW_SEC:
