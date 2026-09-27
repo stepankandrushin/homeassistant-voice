@@ -58,6 +58,15 @@ def transcribe(audio_input):
             files["audio"].close()  # Make sure to close the file if it was opened
 
 
+# The model's greedy decoder drops a whole phrase when its first word loses to
+# "blank" by a small margin at every frame, which the camera mics trigger with
+# a name before the command: "Beaver, turn off the light in the garden" came back as "" in
+# every window until the window slid past "Beaver", ~4 s late. The batch
+# endpoint subtracts this from the blank log-probability until the first
+# symbol (transcription_api decoding.py); 0 decodes exactly as before.
+BLANK_PENALTY = getattr(config, "TRANSCRIPTION_BLANK_PENALTY", 1.5)
+
+
 def transcribe_batch(clips):
     """
     Transcribe several raw PCM clips (s16le, SAMPLE_RATE, mono) in one request
@@ -73,7 +82,7 @@ def transcribe_batch(clips):
         for i, clip in enumerate(clips)
     ]
     try:
-        response = requests.post(url, files=files, timeout=10)
+        response = requests.post(url, files=files, data={"blank_penalty": BLANK_PENALTY}, timeout=10)
         response.raise_for_status()
         texts = response.json()["texts"]
         if len(texts) != len(clips):

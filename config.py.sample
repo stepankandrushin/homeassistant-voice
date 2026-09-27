@@ -28,6 +28,7 @@ WINDOW_SEC = 5.0  # audio per window; must fit the longest command
 WINDOW_HOP_SEC = 0.5  # how often every mic is re-transcribed
 WINDOW_HOLD_HOPS = 1  # rounds a matched command waits for a trailing room word (0 = run at once)
 # TRANSCRIPTION_BATCH_API_URL = "http://192.168.1.65:8889/transcribe_batch"  # default: TRANSCRIPTION_API_URL + "_batch"
+# TRANSCRIPTION_BLANK_PENALTY = 1.5  # makes the model stop dropping whole phrases (see utils/stt.py); 0 = off
 
 # Path to sound file played after command execution or blank for no sound
 HOMEASSISTANT_SOUND = "sounds/homeassistant.wav"

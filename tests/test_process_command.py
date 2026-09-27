@@ -28,6 +28,7 @@ from contextlib import redirect_stdout
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 process_command = None          # bound in setUpModule once the stub config is live
+match_command = None
 _SAVED = {}                     # sys.modules entries we replaced -> restore on teardown
 _STUBBED = []                   # sys.modules entries we created -> remove on teardown
 
@@ -98,14 +99,15 @@ def _install_stub(name, module):
 
 
 def setUpModule():
-    global process_command
+    global process_command, match_command
     _install_stub("config", _make_stub_config())
     try:
         import numpy  # noqa: F401  (use the real one if present)
     except ImportError:
         _install_stub("numpy", types.ModuleType("numpy"))
-    from utils.homeassistant import process_command as pc
+    from utils.homeassistant import match_command as mc, process_command as pc
     process_command = pc
+    match_command = mc
 
 
 def tearDownModule():
@@ -201,6 +203,31 @@ class RoomResolutionTest(unittest.TestCase):
     def test_spoken_room_without_that_device_fails(self):
         # living_room has no fan -> no match even though both words are recognised.
         self.assertEqual(run_quiet("turn on the fan living room"), (False, None, None))
+
+
+class RoomFromMicTest(unittest.TestCase):
+    """match_command's 4th value: did the target come from the mic's room?
+
+    Window mode prefers readings that name their room (utils/window.py).
+    """
+
+    def room_from_mic(self, transcript, source=None):
+        with redirect_stdout(io.StringIO()):
+            return match_command(transcript, source)[3]
+
+    def test_unspoken_room_comes_from_the_mic(self):
+        self.assertTrue(self.room_from_mic("turn on the light", "cam201"))
+        self.assertTrue(self.room_from_mic("turn on the light"))
+
+    def test_spoken_room_does_not(self):
+        self.assertFalse(self.room_from_mic("turn on the light on the terrace", "cam205"))
+
+    def test_room_independent_device_does_not(self):
+        self.assertFalse(self.room_from_mic("turn on the jacuzzi", "cam201"))
+
+    def test_no_match(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(match_command("turn off this"), (False, None, None, False))
 
 
 class PlainMappingTest(unittest.TestCase):

@@ -45,8 +45,11 @@ def send_homeassistant_command(entity_id, service):
 
 @time_execution(label="Check if it's HomeAssistant command")
 def process_command(transcript, source_name=None):
-    """Match a transcript to a command, logging each matching step. See match_command."""
-    return match_command(transcript, source_name)
+    """Match a transcript to a command, logging each matching step. See match_command.
+
+    Returns (success, entity_id, action).
+    """
+    return match_command(transcript, source_name)[:3]
 
 
 def match_command(transcript, source_name=None, log=print):
@@ -63,19 +66,24 @@ def match_command(transcript, source_name=None, log=print):
             Window mode passes a no-op: it matches several transcripts a second.
 
     Returns:
-        tuple: (success, entity_id, action)
+        tuple: (success, entity_id, action, room_from_mic)
             - success (bool): True if a command was matched, False otherwise
             - entity_id (str): The entity ID to control
             - action (str): The action to perform
+            - room_from_mic (bool): True if no room was named and the target
+              came from the mic's default room. Window mode uses it to prefer,
+              among readings of one phrase, those that name the room: a room
+              word that one mic heard garbled ("in the gordon") must not send the
+              command to that mic's own room when another mic heard "in the garden".
     """
     if not transcript:
-        return False, None, None
+        return False, None, None, False
 
     # Check if we have the necessary configuration
     required_attrs = ['action_aliases', 'device_aliases', 'room_entities', 'default_room']
     if not all(hasattr(config, attr) for attr in required_attrs):
         log("Missing required configuration attributes")
-        return False, None, None
+        return False, None, None, False
     
     # Convert transcript to lowercase for case-insensitive matching
     transcript = transcript.lower().strip()
@@ -90,7 +98,7 @@ def match_command(transcript, source_name=None, log=print):
     
     if not action:
         log("No action recognized in transcript")
-        return False, None, None
+        return False, None, None, False
     
     # Find device in transcript
     device = None
@@ -102,7 +110,7 @@ def match_command(transcript, source_name=None, log=print):
     
     if not device:
         log("No device recognized in transcript")
-        return False, None, None
+        return False, None, None, False
     
     # Find room in transcript (optional)
     room_specified = False
@@ -116,6 +124,7 @@ def match_command(transcript, source_name=None, log=print):
             break
     
     # Check if this device can be used without specifying a room
+    room_from_mic = False
     if not room_specified and hasattr(config, 'devices_without_room') and device in config.devices_without_room:
         # Search for the device across all rooms
         entity_id = None
@@ -128,12 +137,13 @@ def match_command(transcript, source_name=None, log=print):
         
         if entity_id is None:
             log(f"No entity found for {device} in any room")
-            return False, None, None
+            return False, None, None, False
     else:
+        room_from_mic = not room_specified
         # Get entity ID for the device in the specified room
         if room not in config.room_entities or device not in config.room_entities[room]:
             log(f"No entity found for {device} in {room}")
-            return False, None, None
+            return False, None, None, False
         
         entity_id = config.room_entities[room][device]
 
@@ -148,10 +158,10 @@ def match_command(transcript, source_name=None, log=print):
             entity_id = entity_id['default']
         else:
             log(f"No entities mapped for action '{action}' on {device} in {room}")
-            return False, None, None
+            return False, None, None, False
 
     log(f"Executing action: {action} on {entity_id} in {room}")
     
     # No longer sending the command here, as it will be sent from main.py
     # Return the values for main.py to use
-    return True, entity_id, action
+    return True, entity_id, action, room_from_mic

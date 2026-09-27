@@ -18,9 +18,12 @@ threshold: the threads only fill a `WINDOW_SEC` ring buffer, and the main
 loop sends every mic's window to the transcription server's
 `/transcribe_batch` every `WINDOW_HOP_SEC`.
 `utils/window.py::WindowCommander` guarantees one execution per utterance
-(one matching window runs a command after a one-round hold for a trailing
-room word, discard-all-mics on fire, cross-mic dedupe). Any change
-there must keep `tests/test_window.py` passing.
+(one matching window runs a command: at once if it names its room, else
+after a one-round hold for a trailing room word; a reading that names its
+room beats another mic's room-less one; discard-all-mics on fire; cross-mic
+dedupe). Any change there must keep `tests/test_window.py` passing. The
+batch request carries `TRANSCRIPTION_BLANK_PENALTY` (default 1.5), without
+which the model drops whole commands that start with a name ("Beaver, …").
 
 Configure one or many sources via `config.AUDIO_RECORD_CMD` (single) or
 `config.AUDIO_RECORD_CMDS` (list of commands, or dict `{name: cmd}` for

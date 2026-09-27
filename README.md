@@ -115,20 +115,37 @@ consecutive windows, so a bad cut or a misheard window no longer loses it.
 STT_MODE = "window"
 WINDOW_SEC = 5.0           # audio per window; must fit your longest command
 WINDOW_HOP_SEC = 0.5       # how often every mic is re-transcribed
-WINDOW_HOLD_HOPS = 1       # rounds a matched command waits for a room word (0 = run at once)
+WINDOW_HOLD_HOPS = 1       # rounds a room-less command waits for a room word (0 = run at once)
+TRANSCRIPTION_BLANK_PENALTY = 1.5  # the default; 0 = plain greedy decoding
 # TRANSCRIPTION_BATCH_API_URL defaults to TRANSCRIPTION_API_URL + "_batch"
 ```
+
+`TRANSCRIPTION_BLANK_PENALTY` is sent with every batch and lowers the
+model's "nothing was said" score until it has recognised a first word. Without it the model often
+returned an empty string for a whole command that started with a word it was
+unsure of, such as a name: "Beaver, turn off the light in the garden" came back as "" in
+every window until the window slid past "Beaver", about 4 s after the
+phrase. Needs transcription_api with `decoding.py` (older servers ignore
+the field).
 
 Each command runs from a single matching window, and each utterance
 executes once (`utils/window.py`, tests in `tests/test_window.py`):
 
-- one window that parses to a command is enough. The command is held for
+- one window that parses to a command is enough. A command that names its
+  room ("turn off the light in the garden") runs at once. One that doesn't is held for
   `WINDOW_HOLD_HOPS` rounds (default 1, i.e. 0.5 s) because a window ending
   right after "turn on the light" already reads as a command for the mic's own
   room, and the next window may add "in the yard". During the hold the latest
   window that parses to a command replaces the held one; a window that
   parses to nothing (misheard, noise) never cancels it. If the text is still
-  growing when the hold ends ("…in the elec"), it waits one more round;
+  growing when the hold ends ("…in the elec"), it waits one more round. A
+  room-less reading that ends in a preposition ("turn off the light in the") was cut
+  off before its room: it is not a command, and a held one doesn't run on it;
+- when several mics are ready in the same round, a reading that names its
+  room beats one that fell back to the mic's own room. Two mics in one room
+  hear the same phrase, and the noisier one may read the room word as
+  gibberish ("in the gordon" for "in the garden"); that reading must not send the
+  command to the living room;
 - once it fires, the audio every mic has buffered so far is discarded, so
   neither that mic nor another mic that heard the same words acts on them
   again (one utterance, one action — even when two mics with different
@@ -136,8 +153,9 @@ executes once (`utils/window.py`, tests in `tests/test_window.py`):
 - the same entity + action is deduped across mics for
   `max(DEDUPE_WINDOW_SEC, WINDOW_SEC)` as a backstop for a lagging stream.
 
-Latency from the first window that has the whole phrase to the HA call is
-one hop (0.5 s), two when a room word follows the device. Window mode handles Home Assistant commands only — the AI
+A command that names its room reaches HA in the same round as the first
+window that holds the whole phrase; one without a room, a hop (0.5 s)
+later. Window mode handles Home Assistant commands only — the AI
 wake-word branch needs whole utterances, which only VAD mode produces.
 Transcript logs record a mic's window text only when it changes.
 
