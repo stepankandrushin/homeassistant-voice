@@ -63,27 +63,31 @@ class WindowCommander:
     """Turns each round's per-mic window transcripts into commands, at most
     once per utterance.
 
-    * A command fires only after `stable_count` consecutive windows from the
-      same mic parse to the same (entity, action), each with no more words
-      than the one before. A window may end mid-phrase: "turn off the light" and
-      then "turn off the light in the elec" both parse as the mic's own room, but the
-      text grew, so the phrase isn't finished and the streak starts over
-      until "…in the electrical room" settles.
-    * When a command fires, the audio every mic has buffered up to this round
-      is discarded, so neither this mic nor another one that heard the same
-      words acts on them again, including in a later window that cuts the
-      phrase differently (e.g. "turn on the light [in the garden]" read as "turn on the light").
+    * One window that parses to a command is enough to run it. The command
+      is held for `hold_hops` rounds first, so that a room named after the
+      device can still arrive: a window ending right after "turn on the light"
+      already reads as a complete command for the mic's own room, and the
+      next one may say "turn on the light in the yard". During the hold the latest
+      window that parses to a command replaces the held one; a window that
+      parses to nothing (misheard, noise) never cancels it. If the text is
+      still growing when the hold ends, it waits one more round.
+      `hold_hops=0` runs a command the moment a window matches.
+    * When a command runs, the audio every mic has buffered up to this round
+      is discarded and every held command dropped, so neither this mic nor
+      another one that heard the same words acts on them again, including in
+      a later window that cuts the phrase differently (e.g. "turn on the light [in the garden]"
+      read as "turn on the light").
     * The same (entity, action) from any mic within `dedupe_sec` of an
       execution is dropped. This backstops a mic whose stream lags and
       delivers part of the phrase only after the discard.
     """
 
-    def __init__(self, match, stable_count=2, dedupe_sec=5.0):
+    def __init__(self, match, hold_hops=1, dedupe_sec=5.0):
         # match(text, source_name) -> (success, entity_id, action)
         self.match = match
-        self.stable_count = stable_count
+        self.hold_hops = hold_hops
         self.dedupe_sec = dedupe_sec
-        self._streaks = {}  # source_name -> (command key, consecutive windows, word count)
+        self._held = {}  # source_name -> held command, see process_round
         self._last_executed = {}  # command key -> time of last execution
 
     def process_round(self, results, now):
@@ -98,20 +102,27 @@ class WindowCommander:
             success, entity_id, action = (
                 self.match(text, name) if text.strip() else (False, None, None)
             )
-            key = (entity_key(entity_id), action) if success else None
             words = len(text.split())
-            prev_key, count, prev_words = self._streaks.get(name, (None, 0, 0))
-            if key is not None and key == prev_key and words <= prev_words:
-                count += 1
+            held = self._held.get(name)
+            if held is None:
+                if not success:
+                    continue
+                held = self._held[name] = {"hops": 0, "words": words}
             else:
-                count = int(key is not None)
-            self._streaks[name] = (key, count, words)
-            if count < self.stable_count:
+                held["hops"] += 1
+            grew = words > held["words"]
+            held["words"] = words
+            if success:
+                held["command"] = (entity_id, action, text)
+            # Wait out the hold, plus one round if the phrase is still growing
+            if held["hops"] < self.hold_hops or (grew and held["hops"] == self.hold_hops):
                 continue
 
-            # The phrase is complete in this mic's window; consume it either way.
-            self._streaks[name] = (None, 0, 0)
+            # Consume the command's audio whether it runs or is a duplicate.
+            entity_id, action, heard = held["command"]
+            del self._held[name]
             discards[name] = end
+            key = (entity_key(entity_id), action)
             last = self._last_executed.get(key)
             if last is not None and now - last < self.dedupe_sec:
                 print(
@@ -121,11 +132,11 @@ class WindowCommander:
                 continue
 
             self._last_executed[key] = now
-            commands.append((name, entity_id, action, text))
+            commands.append((name, entity_id, action, heard))
             # One utterance, one action: consume what every mic has heard so
             # far. The rest of this round's windows hold that same audio.
             for other, _, other_end in results:
                 discards[other] = other_end
-                self._streaks[other] = (None, 0, 0)
+            self._held.clear()
             break
         return commands, discards

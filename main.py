@@ -37,7 +37,7 @@ WATCHDOG_NOTIFY_INTERVAL_SEC = 5.0
 STT_MODE = getattr(config, "STT_MODE", "vad")
 WINDOW_SEC = getattr(config, "WINDOW_SEC", 5.0)
 WINDOW_HOP_SEC = getattr(config, "WINDOW_HOP_SEC", 0.5)
-WINDOW_STABLE_COUNT = getattr(config, "WINDOW_STABLE_COUNT", 2)
+WINDOW_HOLD_HOPS = getattr(config, "WINDOW_HOLD_HOPS", 1)
 
 
 def sd_notify(message):
@@ -277,7 +277,7 @@ def run_window_mode(sources):
     # window length, so dedupe at least that long.
     commander = window.WindowCommander(
         lambda text, name: homeassistant.match_command(text, name, log=lambda _msg: None),
-        stable_count=WINDOW_STABLE_COUNT,
+        hold_hops=WINDOW_HOLD_HOPS,
         dedupe_sec=max(DEDUPE_WINDOW_SEC, WINDOW_SEC),
     )
     by_name = {s.source_name: s for s in sources}
@@ -332,7 +332,7 @@ def main():
     if window_mode:
         print(
             f"Window mode: last {WINDOW_SEC} s of every mic every {WINDOW_HOP_SEC} s, "
-            f"{WINDOW_STABLE_COUNT} matching windows to fire, "
+            f"a matched command waits {WINDOW_HOLD_HOPS} round(s) for a room word, "
             f"dedupe window {max(DEDUPE_WINDOW_SEC, WINDOW_SEC)} s"
         )
     else:

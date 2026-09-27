@@ -18,7 +18,8 @@ threshold: the threads only fill a `WINDOW_SEC` ring buffer, and the main
 loop sends every mic's window to the transcription server's
 `/transcribe_batch` every `WINDOW_HOP_SEC`.
 `utils/window.py::WindowCommander` guarantees one execution per utterance
-(stable-window rule, discard-all-mics on fire, cross-mic dedupe). Any change
+(one matching window runs a command after a one-round hold for a trailing
+room word, discard-all-mics on fire, cross-mic dedupe). Any change
 there must keep `tests/test_window.py` passing.
 
 Configure one or many sources via `config.AUDIO_RECORD_CMD` (single) or

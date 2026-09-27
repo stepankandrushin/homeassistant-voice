@@ -115,15 +115,20 @@ consecutive windows, so a bad cut or a misheard window no longer loses it.
 STT_MODE = "window"
 WINDOW_SEC = 5.0           # audio per window; must fit your longest command
 WINDOW_HOP_SEC = 0.5       # how often every mic is re-transcribed
-WINDOW_STABLE_COUNT = 2    # consecutive agreeing windows before a command fires
+WINDOW_HOLD_HOPS = 1       # rounds a matched command waits for a room word (0 = run at once)
 # TRANSCRIPTION_BATCH_API_URL defaults to TRANSCRIPTION_API_URL + "_batch"
 ```
 
-Each utterance executes once (`utils/window.py`, tests in `tests/test_window.py`):
+Each command runs from a single matching window, and each utterance
+executes once (`utils/window.py`, tests in `tests/test_window.py`):
 
-- a command fires only when `WINDOW_STABLE_COUNT` consecutive windows from a
-  mic parse to the same entity + action **and the text didn't grow** — so
-  "turn off the light" isn't acted on while "…in the electrical room" is still being said;
+- one window that parses to a command is enough. The command is held for
+  `WINDOW_HOLD_HOPS` rounds (default 1, i.e. 0.5 s) because a window ending
+  right after "turn on the light" already reads as a command for the mic's own
+  room, and the next window may add "in the yard". During the hold the latest
+  window that parses to a command replaces the held one; a window that
+  parses to nothing (misheard, noise) never cancels it. If the text is still
+  growing when the hold ends ("…in the elec"), it waits one more round;
 - once it fires, the audio every mic has buffered so far is discarded, so
   neither that mic nor another mic that heard the same words acts on them
   again (one utterance, one action — even when two mics with different
@@ -131,8 +136,8 @@ Each utterance executes once (`utils/window.py`, tests in `tests/test_window.py`
 - the same entity + action is deduped across mics for
   `max(DEDUPE_WINDOW_SEC, WINDOW_SEC)` as a backstop for a lagging stream.
 
-Latency from the end of a phrase to the HA call is roughly one to two hops
-(0.5–1 s). Window mode handles Home Assistant commands only — the AI
+Latency from the first window that has the whole phrase to the HA call is
+one hop (0.5 s), two when a room word follows the device. Window mode handles Home Assistant commands only — the AI
 wake-word branch needs whole utterances, which only VAD mode produces.
 Transcript logs record a mic's window text only when it changes.
 

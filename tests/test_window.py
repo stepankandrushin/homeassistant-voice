@@ -63,7 +63,7 @@ class AudioWindowTest(unittest.TestCase):
 
 class WindowCommanderTest(unittest.TestCase):
     def setUp(self):
-        self.cmd = WindowCommander(fake_match, stable_count=2, dedupe_sec=5.0)
+        self.cmd = WindowCommander(fake_match, hold_hops=1, dedupe_sec=5.0)
         self.t = 1000.0
         self.end = 0
 
@@ -74,14 +74,49 @@ class WindowCommanderTest(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             return self.cmd.process_round([(m, t, self.end) for m, t in texts.items()], self.t)
 
-    def test_one_matching_window_is_not_enough(self):
+    def test_matching_window_is_held_one_round(self):
+        self.assertEqual(self.round(cam204="turn on the light"), ([], {}))
         commands, discards = self.round(cam204="turn on the light")
-        self.assertEqual((commands, discards), ([], {}))
+        self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_on", "turn on the light")])
 
-    def test_two_matching_windows_fire_once_and_consume_every_mic(self):
+    def test_one_matching_window_is_enough(self):
+        # 2026-09-27 19:20: "turn off the light" read right once, then the same
+        # audio came back as "magical" and the command was lost.
+        self.round(cam204="turn off the light")
+        commands, _ = self.round(cam204="magical")
+        self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_off", "turn off the light")])
+
+    def test_empty_next_window_does_not_cancel(self):
+        self.round(cam204="turn on the light")
+        self.assertEqual(len(self.round(cam204="")[0]), 1)
+
+    def test_hold_zero_runs_on_the_first_window(self):
+        self.cmd.hold_hops = 0
+        commands, _ = self.round(cam204="turn on the light")
+        self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_on", "turn on the light")])
+
+    def test_room_named_after_the_device_redirects_the_held_command(self):
+        self.round(cam205="turn on the light")                       # mic's own room so far
+        self.assertEqual(self.round(cam205="turn on the light in the electrical room")[0], [])  # grew: wait
+        commands, _ = self.round(cam205="turn on the light in the electrical room")
+        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_on", "turn on the light in the electrical room")])
+
+    def test_room_word_still_arriving_waits_one_more_round(self):
+        self.round(cam205="turn off the light")
+        self.assertEqual(self.round(cam205="turn off the light in the elec")[0], [])  # same parse, grew
+        commands, _ = self.round(cam205="turn off the light in the electrical room")
+        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_off", "turn off the light in the electrical room")])
+
+    def test_growing_text_waits_at_most_one_extra_round(self):
+        self.round(cam204="turn on the light")
+        self.round(cam204="turn on the light yes")
+        commands, _ = self.round(cam204="turn on the light yes well")
+        self.assertEqual(len(commands), 1)
+
+    def test_run_consumes_every_mic(self):
         self.round(cam204="turn on the light", cam205="")
         commands, discards = self.round(cam204="turn on the light", cam205="")
-        self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_on", "turn on the light")])
+        self.assertEqual(len(commands), 1)
         self.assertEqual(discards, {"cam204": self.end, "cam205": self.end})
 
     def test_same_mic_same_phrase_later_is_not_executed_again(self):
@@ -97,33 +132,15 @@ class WindowCommanderTest(unittest.TestCase):
         commands, discards = self.round(cam205="turn off the light", cam208="turn off the light")
         self.assertEqual(len(commands), 1)
         self.assertEqual(set(discards), {"cam205", "cam208"})
-        # cam208's stream lags and it settles on the phrase a round later
+        # cam208's stream lags and it matches the phrase again a round later
         commands, _ = self.round(cam205="", cam208="turn off the light")
         commands += self.round(cam205="", cam208="turn off the light")[0]
         self.assertEqual(commands, [])
 
-    def test_growing_phrase_does_not_fire_early_for_the_wrong_room(self):
+    def test_other_mic_holding_the_same_phrase_is_dropped(self):
         self.round(cam205="turn off the light")
-        commands, _ = self.round(cam205="turn off the light in the elec")  # same parse, more words
-        self.assertEqual(commands, [])
-        self.round(cam205="turn off the light in the electrical room")
-        commands, _ = self.round(cam205="turn off the light in the electrical room")
-        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_off", "turn off the light in the electrical room")])
-
-    def test_trailing_noise_word_only_delays(self):
-        self.round(cam204="turn on the light")
-        self.assertEqual(self.round(cam204="turn on the light yes")[0], [])
-        self.assertEqual(len(self.round(cam204="turn on the light yes")[0]), 1)
-
-    def test_shorter_window_still_counts(self):
-        self.round(cam204="turn on the light yes")
-        self.assertEqual(len(self.round(cam204="turn on the light")[0]), 1)
-
-    def test_interrupted_streak_starts_over(self):
-        self.round(cam204="turn on the light")
-        self.round(cam204="")
-        self.assertEqual(self.round(cam204="turn on the light")[0], [])
-        self.assertEqual(len(self.round(cam204="turn on the light")[0]), 1)
+        self.round(cam205="turn off the light", cam208="turn off the light")  # cam205 runs, cam208 held
+        self.assertEqual(self.round(cam205="", cam208="")[0], [])
 
     def test_opposite_command_right_after_is_executed(self):
         self.round(cam204="turn on the light")
