@@ -1,7 +1,8 @@
 # homeassistant-voice
 
-Voice control for Home Assistant: capture audio → detect speech → transcribe
-(transcription_api/Whisper) → match action/device/room aliases → call HA REST API.
+Voice control for Home Assistant, English only: capture audio → detect
+speech → transcribe (transcription_api, Parakeet TDT 0.6B v2) → match
+action/device/room aliases → call HA REST API.
 
 Entry point: `main.py`. Each audio input runs in its own `SpeechSource`
 thread that spawns a subprocess writing raw s16le to stdout, detects speech
@@ -21,9 +22,7 @@ loop sends every mic's window to the transcription server's
 (one matching window runs a command: at once if it names its room, else
 after a one-round hold for a trailing room word; a reading that names its
 room beats another mic's room-less one; discard-all-mics on fire; cross-mic
-dedupe). Any change there must keep `tests/test_window.py` passing. The
-batch request carries `TRANSCRIPTION_BLANK_PENALTY` (default 1.5), without
-which the model drops whole commands that start with a name ("Beaver, …").
+dedupe). Any change there must keep `tests/test_window.py` passing.
 
 Configure one or many sources via `config.AUDIO_RECORD_CMD` (single) or
 `config.AUDIO_RECORD_CMDS` (list of commands, or dict `{name: cmd}` for
@@ -33,6 +32,9 @@ code.
 
 ## Conventions
 
+- This repo is public. Host names, IPs, credentials and anything about one
+  particular deployment stay out of tracked files and commit messages; a
+  gitignored `CLAUDE.local.md` may say where such notes live.
 - `config.py` is **not** tracked — each deployment has its own. Start from
   `config.py.sample`.
 - To ship a code change to a deployment host, commit + push + `git pull` on
@@ -48,7 +50,12 @@ code.
   user explicitly pushed back on an `everywhere_aliases` code path because
   the same behavior fell out of existing room-match + list fan-out; they want
   the command-routing kernel to stay small, with capability growing via
-  config. The two bullets below are instances of this rule.
+  config. The bullets below are instances of this rule.
+- An alias (action, device or room) is a substring of the lowercase
+  transcript or a compiled regex searched in it (`homeassistant.alias_in`).
+  English particle verbs split around their object ("turn the light on")
+  are regex aliases in `action_aliases`, not matching code; so are short
+  words that must not match inside others (`\ba ?c\b`, `\bfans?\b`).
 - A `room_entities[room][device]` value may also be a `{action: entity(s)}`
   dict when one action should target a different set than another (e.g. the
   pool `light` whose `turn_off` also kills the jacuzzi while `turn_on`
@@ -56,7 +63,7 @@ code.
   back to a `"default"` key if present. Prefer this over special-casing in
   `process_command`.
 - **Cross-room / "everywhere" commands are config, not code.** When you
-  need a phrase like `turn on the light everywhere` to hit every room's light, add
+  need a phrase like `turn off all the lights` to hit every room's light, add
   a virtual room (e.g. `"everywhere"`) to `room_aliases` and `room_entities`
   whose device entry is a flat list of every entity to trigger. The
   existing room-match + list-entity fan-out handles the rest — do **not**

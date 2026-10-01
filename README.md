@@ -1,12 +1,12 @@
 # Home Assistant Voice Control
 
-A voice-controlled system for Home Assistant that listens for spoken commands, transcribes them using Whisper API, and sends the appropriate commands to your Home Assistant instance.
+A voice-controlled system for Home Assistant that listens for spoken English commands, transcribes them with a speech-to-text server, and sends the appropriate commands to your Home Assistant instance.
 
 ## Features
 
 - **Continuous Audio Monitoring**: Listens for speech using any process that writes raw s16le to stdout (local `arecord`/`parecord` or `ffmpeg` from an RTSP camera)
 - **Speech Detection**: Automatically detects when someone is speaking based on volume threshold (VAD mode), or skips detection and continuously transcribes a sliding window of every mic (window mode) — see below
-- **Speech-to-Text**: Transcribes spoken commands via a pluggable HTTP API (transcription_api or Whisper)
+- **Speech-to-Text**: Transcribes spoken commands via a pluggable HTTP API (transcription_api with Parakeet TDT 0.6B v2, English)
 - **Command Processing**: Parses transcribed text to identify actions, devices, and rooms
 - **Home Assistant Integration**: Sends commands to Home Assistant via its REST API, with support for toggling multiple entities in a single call
 - **Audio Feedback**: Optional Piper TTS and confirmation sounds (can be disabled on hosts without speakers)
@@ -16,7 +16,7 @@ A voice-controlled system for Home Assistant that listens for spoken commands, t
 
 - Python 3.6+
 - One of: ALSA/PulseAudio for a local mic, or `ffmpeg` for an RTSP camera audio track
-- A transcription HTTP endpoint (transcription_api or Whisper), local or remote
+- A transcription HTTP endpoint (transcription_api, Parakeet TDT 0.6B v2, English), local or remote
 - Home Assistant instance with API access
 - Optional: Piper TTS server for spoken responses
 
@@ -51,7 +51,7 @@ A voice-controlled system for Home Assistant that listens for spoken commands, t
    ```
 
 5. Edit `config.py` to configure your:
-   - Whisper API settings
+   - Transcription server URL
    - Home Assistant URL and access token. Generate Long-lived access token in the bottom of http://homeassistant.local:8123/profile/security
    - Audio recording settings
    - Commands and device mappings
@@ -65,8 +65,9 @@ The `config.py` file contains all the configuration options:
 TRANSCRIPTION_API_URL = "http://your-transcription-server:8889/transcribe"
 ```
 The server is expected to accept a multipart `audio` file and return JSON
-`{"text": "..."}`. Any backend that speaks that contract works — see the
-`transcription_api` project or a Whisper-compatible server.
+`{"text": "..."}`, lowercase and without punctuation. Any backend that
+speaks that contract works — see the `transcription_api` project (Parakeet
+TDT 0.6B v2, English).
 
 ### Audio Source Configuration
 ```python
@@ -116,31 +117,24 @@ STT_MODE = "window"
 WINDOW_SEC = 5.0           # audio per window; must fit your longest command
 WINDOW_HOP_SEC = 0.5       # how often every mic is re-transcribed
 WINDOW_HOLD_HOPS = 1       # rounds a room-less command waits for a room word (0 = run at once)
-TRANSCRIPTION_BLANK_PENALTY = 1.5  # the default; 0 = plain greedy decoding
 # TRANSCRIPTION_BATCH_API_URL defaults to TRANSCRIPTION_API_URL + "_batch"
 ```
-
-`TRANSCRIPTION_BLANK_PENALTY` is sent with every batch and lowers the
-model's "nothing was said" score until it has recognised a first word. Without it the model often
-returned an empty string for a whole command that started with a word it was
-unsure of, such as a name: "Beaver, turn off the light in the garden" came back as "" in
-every window until the window slid past "Beaver", about 4 s after the
-phrase. Needs transcription_api with `decoding.py` (older servers ignore
-the field).
 
 Each command runs from a single matching window, and each utterance
 executes once (`utils/window.py`, tests in `tests/test_window.py`):
 
 - one window that parses to a command is enough. A command that names its
-  room ("turn off the light in the garden") runs at once. One that doesn't is held for
-  `WINDOW_HOLD_HOPS` rounds (default 1, i.e. 0.5 s) because a window ending
-  right after "turn on the light" already reads as a command for the mic's own
-  room, and the next window may add "in the yard". During the hold the latest
-  window that parses to a command replaces the held one; a window that
-  parses to nothing (misheard, noise) never cancels it. If the text is still
-  growing when the hold ends ("…in the elec"), it waits one more round. A
-  room-less reading that ends in a preposition ("turn off the light in the") was cut
-  off before its room: it is not a command, and a held one doesn't run on it;
+  room ("turn off the light in the garden") runs at once. One that doesn't
+  is held for `WINDOW_HOLD_HOPS` rounds (default 1, i.e. 0.5 s) because a
+  window ending right after "turn on the light" already reads as a command
+  for the mic's own room, and the next window may add "in the garden".
+  During the hold the latest window that parses to a command replaces the
+  held one; a window that parses to nothing (misheard, noise) never cancels
+  it. If the text is still growing when the hold ends ("… in the gar"), it
+  waits one more round. A room-less reading that ends in "in", "at" or
+  "the" ("turn off the light in the") was cut off before its room: it is
+  not a command, and a held one doesn't run on it ("on" doesn't count:
+  "turn the light on" is complete);
 - when several mics are ready in the same round, a reading that names its
   room beats one that fell back to the mic's own room. Two mics in one room
   hear the same phrase, and the noisier one may read the room word as
@@ -161,18 +155,28 @@ Transcript logs record a mic's window text only when it changes.
 
 ### Command Configuration
 
-Define aliases for actions, devices, and rooms:
+Define aliases for actions, devices, and rooms. An alias is a substring of
+the lowercase transcript, or a compiled regex (`re.compile(...)`) searched in
+it — for what a substring can't say, such as a particle verb split around
+its object ("turn the light on") or a short word that must not match inside
+others ("ac" in "back"):
 
 ```python
-# Action aliases (turn on/off)
+import re
+
+# Action aliases (turn on/off). The words between "turn"/"switch" and
+# "on"/"off" may not be "on"/"off", so "turn off the light on the terrace"
+# stays turn_off.
 action_aliases = {
-    "turn_on": ["turn on", "enable", "start", "switch on"],
-    "turn_off": ["turn off", "disable", "stop", "switch off"]
+    "turn_on": ["turn on", "switch on", "enable", "start",
+                re.compile(r"\b(?:turn|switch) (?:(?!on\b|off\b)\w+ ){1,5}on\b")],
+    "turn_off": ["turn off", "switch off", "disable", "stop",
+                 re.compile(r"\b(?:turn|switch) (?:(?!on\b|off\b)\w+ ){1,5}off\b")],
 }
 
 # Device aliases
 device_aliases = {
-    "ac": ["ac", "air conditioner", "air conditioning"],
+    "ac": [re.compile(r"\ba ?c\b"), "air conditioner", "air conditioning"],
     "light": ["light", "lamp"],
     "tv": ["tv", "television"]
 }
@@ -184,6 +188,9 @@ room_aliases = {
     "living_room": ["living room", "lounge"]
 }
 ```
+
+The first matching entry wins in each dict, so order matters: e.g. list a
+bare-room pseudo-device like "pool" after the real devices.
 
 Map devices to Home Assistant entity IDs. A device may be mapped to a
 single entity ID or to a **list** of entity IDs that share a domain — a
@@ -204,8 +211,8 @@ room_entities = {
 
 #### "Everywhere" / cross-room commands
 
-To make a phrase like `turn on the light everywhere` (or `turn on the lights
-everywhere`) trigger every room's light at once, add a **virtual room**
+To make a phrase like `turn on the light everywhere` trigger every
+room's light at once, add a **virtual room**
 to `room_aliases` and `room_entities` whose device entry is a flat list
 of every entity to hit. No code changes needed — the existing room
 matching plus list-entity fan-out already does it.
@@ -213,8 +220,8 @@ matching plus list-entity fan-out already does it.
 ```python
 room_aliases = {
     "office":     ["office"],
-    "garden":     ["garden", "yard"],
-    "everywhere": ["everywhere", "all lights"],
+    "garden":     ["garden", "outside"],
+    "everywhere": ["everywhere", "all lights", "all the lights"],
 }
 
 room_entities = {
@@ -242,7 +249,7 @@ python main.py
 
 The program will start listening for voice commands. When it detects speech, it will:
 1. Record the audio
-2. Transcribe it using Whisper API
+2. Transcribe it via the transcription server
 3. Process the transcription to identify commands
 4. Send the appropriate command to Home Assistant
 5. Play a confirmation sound if the command was successful
@@ -383,7 +390,7 @@ The system recognizes commands in the format:
 Examples:
 - "Turn on the light in the office"
 - "Turn off the AC in the bedroom"
-- "Turn on the TV"
+- "Turn the TV on" (with the particle-verb regexes above)
 
 The room is optional if the device is configured in `devices_without_room`.
 
@@ -398,7 +405,7 @@ The room is optional if the device is configured in `devices_without_room`.
 
 ### Transcription Issues
 
-- Verify that your Whisper API server is running and accessible
+- Verify that your transcription server is running and accessible
 - Check the server logs for any errors
 - Try testing with the `transcribe.py` script to isolate issues
 
@@ -407,6 +414,10 @@ The room is optional if the device is configured in `devices_without_room`.
 - Verify that your Home Assistant URL and token are correct
 - Check that the entity IDs in your configuration match those in Home Assistant
 - Ensure that your Home Assistant instance is running and accessible
+
+## Contributing
+
+Project overview and conventions for contributors: CLAUDE.md
 
 ## License
 
