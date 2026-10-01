@@ -60,7 +60,8 @@ class AudioWindow:
 
 
 # A room-less reading that ends in one of these was cut off before its room:
-# The model reads a window ending inside "in the garden" as "… light in the".
+# a window ending inside "in the garden" reads "… the light in the". Not "on":
+# "turn the light on" ends in it and is complete.
 ROOM_PREPOSITIONS = {"in", "at", "the"}
 
 
@@ -71,26 +72,27 @@ class WindowCommander:
     * One window that parses to a command is enough to run it. A command
       that names its room runs at once. One that doesn't is held for
       `hold_hops` rounds first, so that a room named after the device can
-      still arrive: a window ending right after "turn on the light" already reads
-      as a complete command for the mic's own room, and the next one may say
-      "turn on the light in the yard". During the hold the latest window that parses to
-      a command replaces the held one; a window that parses to nothing
-      (misheard, noise) never cancels it. If the text is still growing when
-      the hold ends, it waits one more round. A room-less reading that ends
-      in a preposition ("turn off the light in the") is not a command yet: it neither
-      starts nor replaces a hold, and a held command doesn't run on it.
-      `hold_hops=0` runs every command the moment a window matches.
+      still arrive: a window ending right after "turn on the light" already
+      reads as a complete command for the mic's own room, and the next one
+      may say "turn on the light in the garden". During the hold the latest
+      window that parses to a command replaces the held one; a window that
+      parses to nothing (misheard, noise) never cancels it. If the text is
+      still growing when the hold ends, it waits one more round. A room-less
+      reading that ends in a preposition ("turn off the light in the") is
+      not a command yet: it neither starts nor replaces a hold, and a held
+      command doesn't run on it. `hold_hops=0` runs every command the moment
+      a window matches.
     * Across mics, a reading that names its room beats one whose room came
       from the mic (see match_command's `room_from_mic`): when a hold ends on
-      "turn on the light in the gordon" (a garbled room, so the mic's own room) while
-      another mic reads "turn on the light in the garden", the latter runs. Otherwise
-      the noisier of two mics in a room decides where the light goes
-      whenever it happens to finish first.
+      "turn on the light in the gordon" (a garbled room, so the mic's own
+      room) while another mic reads "turn on the light in the garden", the
+      latter runs. Otherwise the noisier of two mics in a room decides where
+      the light goes whenever it happens to finish first.
     * When a command runs, the audio every mic has buffered up to this round
       is discarded and every held command dropped, so neither this mic nor
       another one that heard the same words acts on them again, including in
-      a later window that cuts the phrase differently (e.g. "turn on the light [in the garden]"
-      read as "turn on the light").
+      a later window that cuts the phrase differently (e.g. "turn on the
+      light in the garden" cut to "turn on the light", the mic's own room).
     * The same (entity, action) from any mic within `dedupe_sec` of an
       execution is dropped. This backstops a mic whose stream lags and
       delivers part of the phrase only after the discard.

@@ -29,9 +29,9 @@ def fake_match(text, source):
     action = "turn_off" if "turn off" in text else "turn_on" if "turn on" in text else None
     if action is None or "light" not in text:
         return False, None, None, False
-    if "electrical room" in text:
+    if "electrical" in text:
         return True, ELECTRICAL, action, False
-    if "in the garden" in text:
+    if "garden" in text:
         return True, GARDEN, action, False
     return True, MIC_ROOMS[source], action, True
 
@@ -84,10 +84,10 @@ class WindowCommanderTest(unittest.TestCase):
         self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_on", "turn on the light")])
 
     def test_one_matching_window_is_enough(self):
-        # 2026-09-27 19:20: "turn off the light" read right once, then the same
-        # audio came back as "magical" and the command was lost.
+        # A phrase read right once, then misheard in the next window, must
+        # still run rather than be lost.
         self.round(cam204="turn off the light")
-        commands, _ = self.round(cam204="magical")
+        commands, _ = self.round(cam204="tough delight")
         self.assertEqual(commands, [("cam204", ELECTRICAL, "turn_off", "turn off the light")])
 
     def test_empty_next_window_does_not_cancel(self):
@@ -102,7 +102,8 @@ class WindowCommanderTest(unittest.TestCase):
     def test_room_named_after_the_device_redirects_the_held_command(self):
         self.assertEqual(self.round(cam205="turn on the light")[0], [])  # mic's own room so far
         commands, _ = self.round(cam205="turn on the light in the electrical room")
-        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_on", "turn on the light in the electrical room")])
+        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_on",
+                                     "turn on the light in the electrical room")])
 
     def test_named_room_runs_on_the_first_window(self):
         # Nothing can still change where it goes, so don't wait a round.
@@ -113,21 +114,22 @@ class WindowCommanderTest(unittest.TestCase):
         self.round(cam205="turn off the light")
         self.assertEqual(self.round(cam205="turn off the light in the elec")[0], [])  # same parse, grew
         commands, _ = self.round(cam205="turn off the light in the electrical room")
-        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_off", "turn off the light in the electrical room")])
+        self.assertEqual(commands, [("cam205", ELECTRICAL, "turn_off",
+                                     "turn off the light in the electrical room")])
 
     def test_named_room_runs_before_a_garbled_reading_can_replace_it(self):
-        # 2026-09-27 11:34, cam205: "… light in the garden", then the next window
-        # read the room as "in the guard" (no room -> the mic's living room).
+        # The window after the one that named the room reads it garbled (no
+        # room -> the mic's living room); the named reading must win.
         self.round(cam205="turn on the light")
         self.round(cam205="turn on the light in the")
         commands = self.round(cam205="turn on the light in the garden")[0]
-        commands += self.round(cam205="turn on the light in the guard")[0]
+        commands += self.round(cam205="turn on the light in the gordon")[0]
         self.assertEqual(commands, [("cam205", GARDEN, "turn_on", "turn on the light in the garden")])
 
     def test_other_mics_named_room_beats_this_mics_own_room(self):
-        # 2026-09-27 11:34:36: both living-room mics heard "please turn on
-        # the light in the garden"; cam205 read the room as "in the gordon" and, being first,
-        # turned on the living room instead of the garden.
+        # Both living-room mics hear the phrase; cam205 garbles the room and,
+        # if it won by finishing first, would light the living room instead
+        # of the garden.
         self.round(cam205="please turn on the light", cam208="please turn on the light in the")
         commands, discards = self.round(cam205="please turn on the light in the gordon",
                                         cam208="please turn on the light in the garden")
@@ -142,16 +144,16 @@ class WindowCommanderTest(unittest.TestCase):
         self.assertEqual(set(discards), {"cam205", "cam208"})
 
     def test_duplicate_named_reading_takes_the_roomless_copy_with_it(self):
-        # 2026-09-27 14:55:20: the garden went off; a moment later both mics
-        # read the tail of the same phrase, cam205 without the room word.
+        # The garden went off; a moment later both mics read the tail of the
+        # same phrase, cam205 without the room word.
         self.assertEqual(len(self.round(cam208="turn off the light in the garden")[0]), 1)
         self.round(cam205="turn off the light", cam208="")
         self.assertEqual(self.round(cam205="turn off the light", cam208="turn off the light in the garden")[0], [])
         self.assertEqual(self.round(cam205="", cam208="")[0], [])
 
     def test_reading_cut_off_before_its_room_is_not_a_command(self):
-        # 2026-09-27 14:54: the window ended inside "in the garden" and read
-        # "… light in the"; the next came back empty, and the living room went off.
+        # The window ended inside "in the garden"; the next came back empty.
+        # Running it would have switched the mic's own room.
         self.assertEqual(self.round(cam208="the light turn off the light in the")[0], [])
         self.assertEqual(self.round(cam208="")[0], [])
 
@@ -210,6 +212,14 @@ class WindowCommanderTest(unittest.TestCase):
         self.t += 5.0
         self.round(cam204="turn on the light")
         self.assertEqual(len(self.round(cam204="turn on the light")[0]), 1)
+
+    def test_particle_verb_ending_in_on_is_not_cut_off(self):
+        # "on" is not a room preposition: "turn the light on" is complete.
+        cmd = WindowCommander(lambda text, src: (True, LIVING, "turn_on", True), hold_hops=1)
+        with redirect_stdout(io.StringIO()):
+            cmd.process_round([("cam205", "turn the light on", 1)], 0.0)
+            commands, _ = cmd.process_round([("cam205", "turn the light on", 2)], 0.5)
+        self.assertEqual(commands, [("cam205", LIVING, "turn_on", "turn the light on")])
 
     def test_empty_text_never_reaches_the_matcher(self):
         seen = []
