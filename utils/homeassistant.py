@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import requests
 import config
 import os
@@ -43,6 +44,15 @@ def send_homeassistant_command(entity_id, service):
         print(f"Error sending command to Home Assistant: {e}")
         return False
 
+def alias_in(alias, transcript):
+    """An alias is a substring, or a compiled regex that must be found in the
+    transcript. Regexes let config express what a substring can't, e.g. an
+    English particle verb split around its object ("turn the light on")."""
+    if isinstance(alias, re.Pattern):
+        return alias.search(transcript) is not None
+    return alias in transcript
+
+
 @time_execution(label="Check if it's HomeAssistant command")
 def process_command(transcript, source_name=None):
     """Match a transcript to a command, logging each matching step. See match_command.
@@ -73,8 +83,9 @@ def match_command(transcript, source_name=None, log=print):
             - room_from_mic (bool): True if no room was named and the target
               came from the mic's default room. Window mode uses it to prefer,
               among readings of one phrase, those that name the room: a room
-              word that one mic heard garbled ("in the gordon") must not send the
-              command to that mic's own room when another mic heard "in the garden".
+              word that one mic heard garbled ("in the gordon") must not send
+              the command to that mic's own room when another mic heard "in
+              the garden".
     """
     if not transcript:
         return False, None, None, False
@@ -91,7 +102,7 @@ def match_command(transcript, source_name=None, log=print):
     # Find action in transcript
     action = None
     for action_name, aliases in config.action_aliases.items():
-        if any(alias in transcript for alias in aliases):
+        if any(alias_in(alias, transcript) for alias in aliases):
             action = action_name
             log(f"Action recognized: {action}")
             break
@@ -103,7 +114,7 @@ def match_command(transcript, source_name=None, log=print):
     # Find device in transcript
     device = None
     for device_name, aliases in config.device_aliases.items():
-        if any(alias in transcript for alias in aliases):
+        if any(alias_in(alias, transcript) for alias in aliases):
             device = device_name
             log(f"Device recognized: {device}")
             break
@@ -117,7 +128,7 @@ def match_command(transcript, source_name=None, log=print):
     source_rooms = getattr(config, 'source_rooms', {})
     room = source_rooms.get(source_name, config.default_room)
     for room_name, aliases in config.room_aliases.items():
-        if any(alias in transcript for alias in aliases):
+        if any(alias_in(alias, transcript) for alias in aliases):
             room = room_name
             room_specified = True
             log(f"Room recognized: {room}")

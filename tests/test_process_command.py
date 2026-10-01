@@ -11,6 +11,8 @@ on, in particular:
   * the bare-room "pool" pseudo-device ordering invariant — it must stay LAST in
     device_aliases so a real device word (light/jacuzzi/bubbles) always wins and
     only an utterance with the pool word and no device word falls through to it.
+  * regex aliases — an alias may be a compiled regex, which is how English
+    particle verbs split around their object ("turn the light on") are config.
 
 process_command reads the global `config` module, and importing it pulls in
 numpy via utils.audio, so the test installs a synthetic config (and a numpy stub
@@ -19,6 +21,7 @@ when numpy is absent) into sys.modules before importing, and restores them after
 
 import io
 import os
+import re
 import sys
 import types
 import unittest
@@ -38,8 +41,10 @@ def _make_stub_config():
     cfg = types.ModuleType("config")
 
     cfg.action_aliases = {
-        "turn_on": ["turn on", "start"],
-        "turn_off": ["turn off", "stop"],
+        "turn_on": ["turn on", "start",
+                    re.compile(r"\b(?:turn|switch) (?:(?!on\b|off\b)\w+ ){1,5}on\b")],
+        "turn_off": ["turn off", "stop",
+                     re.compile(r"\b(?:turn|switch) (?:(?!on\b|off\b)\w+ ){1,5}off\b")],
     }
 
     # ON lights the pool; OFF also kills the jacuzzi + bubbles. Shared by the
@@ -52,12 +57,12 @@ def _make_stub_config():
 
     cfg.device_aliases = {
         "light": ["light"],
-        "fan": ["fan", "propeller"],
-        "bubbles": ["bubbles", "bubble"],   # before jacuzzi
+        "fan": [re.compile(r"\bfans?\b")],   # not "fantastic"
+        "bubbles": ["bubbles"],               # before jacuzzi
         "jacuzzi": ["jacuzzi"],
         "heater": ["heater"],
         "gate": ["gate"],
-        "pool": ["pool"],            # MUST be last
+        "pool": ["pool"],                     # MUST be last
     }
 
     cfg.room_aliases = {
@@ -168,7 +173,7 @@ class BareRoomPoolDeviceTest(unittest.TestCase):
                                   "switch.pool_jacuzzi", "switch.pool_bubbles"])
 
     def test_bare_pool_word_on_hits_lights_only(self):
-        ok, entity, action = run_quiet("turn on the pool")
+        ok, entity, action = run_quiet("switch the pool on")
         self.assertEqual((ok, action), (True, "turn_on"))
         self.assertEqual(entity, ["switch.pool_light", "switch.pool_ceiling"])
 
@@ -202,7 +207,7 @@ class RoomResolutionTest(unittest.TestCase):
 
     def test_spoken_room_without_that_device_fails(self):
         # living_room has no fan -> no match even though both words are recognised.
-        self.assertEqual(run_quiet("turn on the fan living room"), (False, None, None))
+        self.assertEqual(run_quiet("turn on the fan in the living room"), (False, None, None))
 
 
 class RoomFromMicTest(unittest.TestCase):
@@ -227,7 +232,7 @@ class RoomFromMicTest(unittest.TestCase):
 
     def test_no_match(self):
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(match_command("turn off this"), (False, None, None, False))
+            self.assertEqual(match_command("turn it off"), (False, None, None, False))
 
 
 class PlainMappingTest(unittest.TestCase):
@@ -242,6 +247,34 @@ class PlainMappingTest(unittest.TestCase):
         self.assertEqual(entity, ["switch.terrace_fan_1", "switch.terrace_fan_2"])
 
 
+class RegexAliasTest(unittest.TestCase):
+    """Aliases that are compiled regexes: English particle verbs, whole words."""
+
+    def test_particle_verb_split_around_the_device(self):
+        self.assertEqual(run_quiet("turn the light on"), (True, "switch.living_light", "turn_on"))
+
+    def test_particle_verb_with_room_word_in_between(self):
+        ok, entity, action = run_quiet("turn the pool light off")
+        self.assertEqual((ok, action), (True, "turn_off"))
+        self.assertEqual(entity, ["switch.pool_light", "switch.pool_ceiling",
+                                  "switch.pool_jacuzzi", "switch.pool_bubbles"])
+
+    def test_on_as_a_preposition_does_not_turn_on(self):
+        ok, entity, action = run_quiet("turn off the light on the terrace", "cam205")
+        self.assertEqual((ok, action), (True, "turn_off"))
+        self.assertEqual(entity, ["switch.terrace_light_main", "switch.terrace_strip"])
+
+    def test_word_regex_does_not_match_inside_a_word(self):
+        # "fan" in "fantastic" is not the fan (listed before heater), so the
+        # heater is the device.
+        ok, entity, _ = run_quiet("turn on the fantastic heater", "cam201")
+        self.assertEqual((ok, entity), (True, "switch.heater"))
+
+    def test_plural_matches_word_regex(self):
+        ok, entity, _ = run_quiet("switch the fans on", "cam201")
+        self.assertEqual((ok, entity), (True, ["switch.terrace_fan_1", "switch.terrace_fan_2"]))
+
+
 class NoMatchTest(unittest.TestCase):
     """Early-exit paths return a clean (False, None, None)."""
 
@@ -249,10 +282,10 @@ class NoMatchTest(unittest.TestCase):
         self.assertEqual(run_quiet(""), (False, None, None))
 
     def test_no_action_word(self):
-        self.assertEqual(run_quiet("pool please"), (False, None, None))
+        self.assertEqual(run_quiet("the pool please"), (False, None, None))
 
     def test_no_device_word(self):
-        self.assertEqual(run_quiet("turn off this"), (False, None, None))
+        self.assertEqual(run_quiet("turn it off"), (False, None, None))
 
 
 if __name__ == "__main__":
