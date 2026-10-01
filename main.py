@@ -158,6 +158,11 @@ class SpeechSource(Thread):
                         length_sec = len(recording) / (config.SAMPLE_RATE * config.SAMPLE_WIDTH)
                         print(f"[{self.source_name}] silence detected, length {length_sec:.2f}s")
                         if length_sec >= config.MIN_RECORDING_LENGTH_SEC:
+                            if getattr(config, "SAVE_RECORDINGS_TO_DISK", False):
+                                stamp = datetime.datetime.fromtimestamp(now).strftime("%Y%m%d_%H%M%S")
+                                saved_path = audio.save_audio_to_file(
+                                    bytes(recording), f"{self.source_name}_{stamp}.wav")
+                                print(f"[{self.source_name}] saved recording to {saved_path}")
                             transcript = stt.transcribe(bytes(recording))
                             print(f"[{self.source_name}] transcript: {transcript}")
                             append_transcript(self.source_name, now, transcript)

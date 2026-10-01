@@ -2,18 +2,20 @@
 # Configuration file for speech detection and transcription system
 import re
 
-TRANSCRIPTION_API_URL = "http://192.168.1.65:8889/transcribe"
+# Transcription server (see README "Transcription API"); localhost if it runs
+# on this machine.
+TRANSCRIPTION_API_URL = "http://localhost:8889/transcribe"
 
 # Home Assistant configuration.
 # Generate Long-lived access token in the bottom of http://homeassistant.local:8123/profile/security
-HOMEASSISTANT_URL = "http://192.168.1.66:8123"
+HOMEASSISTANT_URL = "http://homeassistant.local:8123"
 HOMEASSISTANT_TOKEN = "YOUR LONG-LIVED ACCESS TOKEN"
 
 OPENAI_API_KEY = "YOUR SAMPLE KEY"
 
 # Audio recording configuration
 RECORDINGS_DIR = "recordings"
-SAVE_RECORDINGS_TO_DISK = False  # Set to True to save all recordings to disk
+SAVE_RECORDINGS_TO_DISK = False  # VAD mode: also save each utterance as RECORDINGS_DIR/YYYY/MM/DD/<mic>_<time>.wav
 DB_THRESHOLD = 50  # Default speech detection threshold in dB
 SILENCE_THRESHOLD_MS = 500  # Default silence duration threshold in ms
 MIN_RECORDING_LENGTH_SEC = 1.0  # Minimum recording length to process
@@ -28,7 +30,11 @@ STT_MODE = "vad"
 WINDOW_SEC = 5.0  # audio per window; must fit the longest command
 WINDOW_HOP_SEC = 0.5  # how often every mic is re-transcribed
 WINDOW_HOLD_HOPS = 1  # rounds a matched command waits for a trailing room word (0 = run at once)
-# TRANSCRIPTION_BATCH_API_URL = "http://192.168.1.65:8889/transcribe_batch"  # default: TRANSCRIPTION_API_URL + "_batch"
+# TRANSCRIPTION_BATCH_API_URL = "http://localhost:8889/transcribe_batch"  # default: TRANSCRIPTION_API_URL + "_batch"
+
+# The same entity + action heard again within this many seconds (e.g. by two
+# mics in one room) runs only once.
+# DEDUPE_WINDOW_SEC = 2.0
 
 # Path to sound file played after command execution or blank for no sound
 HOMEASSISTANT_SOUND = "sounds/homeassistant.wav"
@@ -52,13 +58,25 @@ SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2  # 16-bit audio (S16_LE)
 CHANNELS = 1
 
-# TTS API configuration
-TTS_API_URL = "192.168.1.65:5000"
+# Piper TTS HTTP server for spoken AI answers: POST {"text": ...} returns audio.
+TTS_API_URL = "http://localhost:5000"
 
 # Audio recording command for PulseAudio
 # AUDIO_RECORD_CMD = ["parecord", "--property=media.role=phone", f"--rate={SAMPLE_RATE}", f"--channels={CHANNELS}", "--format=s16le", "--raw", "--latency-msec", "10"]
 # Audio recording command for ALSA (use this if PulseAudio is not available)
 AUDIO_RECORD_CMD = ["arecord", "-D", "dsnoop:CARD=MS,DEV=0", "-r", str(SAMPLE_RATE), "-c", str(CHANNELS), "-f", "S16_LE", "-t", "raw"]
+
+# Several mics at once: AUDIO_RECORD_CMDS replaces AUDIO_RECORD_CMD. A dict
+# {name: cmd} names each mic in logs and in source_rooms /
+# source_db_thresholds below; a plain list gets the names mic1, mic2, ...
+# def _rtsp(url):
+#     return ["ffmpeg", "-loglevel", "quiet", "-rtsp_transport", "tcp", "-i", url,
+#             "-vn", "-acodec", "pcm_s16le", "-ar", str(SAMPLE_RATE), "-ac", str(CHANNELS),
+#             "-f", "s16le", "-"]
+# AUDIO_RECORD_CMDS = {
+#     "kitchen": _rtsp("rtsp://user:pass@kitchen-camera.local:554/Streaming/Channels/102"),
+#     "garden": _rtsp("rtsp://user:pass@garden-camera.local:554/Streaming/Channels/102"),
+# }
 
 # AI assistant names for wake word detection. The first name is used as the default wake word
 ai_assistant_names = ["smarty", "beaver"]
@@ -100,7 +118,7 @@ default_room = "office"
 # Per-source default room. When the utterance doesn't name a room, the mic's
 # location (keyed by its name in AUDIO_RECORD_CMDS) overrides default_room.
 # source_rooms = {
-#     "cam201": "terrace",
+#     "garden": "garden",
 # }
 
 # Per-source speech threshold in dB (keyed like source_rooms), overriding
@@ -108,7 +126,7 @@ default_room = "office"
 # floor sits above its threshold never detects silence, so one "utterance"
 # swallows minutes of audio.
 # source_db_thresholds = {
-#     "cam204": 62,
+#     "kitchen": 62,
 # }
 
 # Devices that can be called without specifying a room
@@ -119,7 +137,7 @@ devices_without_room = ["ac"]
 # Structure: room -> device -> entity_id
 room_entities = {
     "office": {
-        "ac": "climate.faikin_office_mqtt_hvac",
+        "ac": "climate.office_ac",
         # Add more devices as needed
         # "light": "light.office_main",
         # "tv": "media_player.office_tv",
