@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import subprocess
 import json
 import config
@@ -108,9 +109,9 @@ def _play_tts_segment(text):
         dict: A dictionary containing the processes or None if failed
     """
     try:
-        optimized_text = text
-        # remove sybols: * , . from the text to avoid issues with the TTS API
-        optimized_text = optimized_text.replace('*', '').replace(',', '').replace('.', '')
+        # remove symbols: * and , . outside numbers to avoid issues with the
+        # TTS API; piper reads the digits themselves
+        optimized_text = re.sub(r"\*|[,.](?!\d)|(?<!\d)[,.]", "", text)
 
         # Prepare the JSON data for the new TTS API
         json_data = json.dumps({"text": optimized_text})
