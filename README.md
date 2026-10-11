@@ -488,7 +488,7 @@ is found in whichever room has it.
 
 ## Contributing
 
-Project overview and conventions for contributors: CLAUDE.md
+Project overview and conventions for contributors: AGENTS.md
 
 ## License
 
