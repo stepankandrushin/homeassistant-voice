@@ -12,7 +12,7 @@ The TTS (Text-to-Speech) system has been refactored to use a queue-based archite
 - Manual management of playback order
 
 ### New System
-- `play_tts_response()` returns a boolean (success/failure)
+- `play_tts_response()` returns a boolean success/failure
 - Queue-based system for sequential playback
 - Automatic thread management for audio playback
 - Global `current_playing_process` tracks the active audio

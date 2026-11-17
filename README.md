@@ -6,7 +6,7 @@ A voice-controlled system for Home Assistant that listens for spoken English com
 
 - **Continuous Audio Monitoring**: Listens on one or several mics at once, each read from any process that writes raw s16le to stdout (local `arecord`/`parecord` or `ffmpeg` from an RTSP camera)
 - **Speech Detection**: Automatically detects when someone is speaking based on volume threshold (VAD mode), or skips detection and continuously transcribes a sliding window of every mic (window mode) — see below
-- **Speech-to-Text**: Transcribes spoken commands via a small HTTP API (see [Transcription API](#transcription-api)); developed against NVIDIA Parakeet TDT 0.6B v2, English
+- **Speech-to-Text**: Transcribes spoken commands via a small HTTP API (see [Transcription API](#transcription-api)); developed against NVIDIA Parakeet TDT 0.6B v2 English
 - **Command Processing**: Parses transcribed text to identify actions, devices, and rooms
 - **Home Assistant Integration**: Sends commands to Home Assistant via its REST API, with support for toggling multiple entities in a single call
 - **Audio Feedback**: Optional Piper TTS and confirmation sounds (can be disabled on hosts without speakers)
@@ -20,7 +20,7 @@ A voice-controlled system for Home Assistant that listens for spoken English com
 - Home Assistant instance with API access
 - Optional: Piper TTS server and an OpenAI API key for the AI assistant branch
 
-Python packages (`requirements.txt`): numpy, requests and openai. `openai` is
+Python packages `requirements.txt` - numpy, requests and openai. `openai` is
 imported at startup but only called by the AI assistant branch.
 
 ## Installation
@@ -65,16 +65,16 @@ TRANSCRIPTION_API_URL = "http://localhost:8889/transcribe"
 The server must provide:
 
 - `POST /transcribe` — a multipart form with one WAV file in the `audio`
-  field; returns JSON `{"text": "..."}`.
+  field; returns JSON `{"text": "..."}`
 - `POST /transcribe_batch` (window mode only) — a multipart form with
   several WAV files, each in its own `audio` field; returns JSON
-  `{"texts": ["...", ...]}`, one text per file, in the order sent. Its URL
-  defaults to `TRANSCRIPTION_API_URL + "_batch"`; set
+  `{"texts": ["...", ...]}` one text per file, in the order sent. Its URL
+  defaults to `TRANSCRIPTION_API_URL + "_batch"` set
   `TRANSCRIPTION_BATCH_API_URL` to override it.
 
 Texts should be lowercase and without punctuation: aliases are matched
 against them as they are. The clips are mono 16-bit WAV at `SAMPLE_RATE`
-(16 kHz).
+16 kHz.
 
 ### Audio Source Configuration
 ```python
@@ -97,7 +97,7 @@ source whose process exits or stops sending audio is restarted.
 
 `AUDIO_RECORD_CMDS` replaces `AUDIO_RECORD_CMD` and runs every source at
 once. As a dict, its keys name the mics in logs and in the per-mic settings
-below; as a plain list, the mics are named `mic1`, `mic2`, …
+below; as a plain list, the mics are named `mic1` `mic2` …
 
 ```python
 AUDIO_RECORD_CMDS = {
@@ -150,18 +150,18 @@ OPENAI_API_KEY = "sk-..."
 
 In VAD mode, an utterance that is not a Home Assistant command and starts
 with one of `ai_assistant_names` ("smarty, what's the capital of France")
-goes to OpenAI (GPT-4o), and the answer is spoken through the TTS server.
+goes to OpenAI GPT-4o and the answer is spoken through the TTS server.
 
 ### Window mode (noisy mics)
 
 With `STT_MODE = "vad"` (the default) an utterance is cut out when the level
 crosses `DB_THRESHOLD` and transcribed once. When a mic's noise floor sits
 close to speech level (a fan, a far camera), quieter syllables fall below the
-threshold and phrases get chopped (`turn on` | `the light`), so commands are missed.
+threshold and phrases get chopped `turn on` | `the light` so commands are missed.
 
 `STT_MODE = "window"` drops the threshold: each mic keeps its last
 `WINDOW_SEC` of audio, and every `WINDOW_HOP_SEC` the last window of every
-mic goes to the transcription server in **one batch** (`/transcribe_batch`).
+mic goes to the transcription server in **one batch** `/transcribe_batch`
 A spoken command lands whole in several
 consecutive windows, so a bad cut or a misheard window no longer loses it.
 
@@ -174,11 +174,11 @@ WINDOW_HOLD_HOPS = 1       # rounds a room-less command waits for a room word (0
 ```
 
 Each command runs from a single matching window, and each utterance
-executes once (`utils/window.py`, tests in `tests/test_window.py`):
+executes once `utils/window.py` tests in `tests/test_window.py`
 
 - one window that parses to a command is enough. A command that names its
   room ("turn off the light in the garden") runs at once. One that doesn't
-  is held for `WINDOW_HOLD_HOPS` rounds (default 1, i.e. 0.5 s) because a
+  is held for `WINDOW_HOLD_HOPS` rounds (default 1 i.e. 0.5 s) because a
   window ending right after "turn on the light" already reads as a command
   for the mic's own room, and the next window may add "in the garden".
   During the hold the latest window that parses to a command replaces the
@@ -201,7 +201,7 @@ executes once (`utils/window.py`, tests in `tests/test_window.py`):
   `max(DEDUPE_WINDOW_SEC, WINDOW_SEC)` as a backstop for a lagging stream.
 
 A command that names its room reaches HA in the same round as the first
-window that holds the whole phrase; one without a room, a hop (0.5 s)
+window that holds the whole phrase; one without a room, a hop 0.5 s
 later. Window mode handles Home Assistant commands only — the AI
 wake-word branch needs whole utterances, which only VAD mode produces.
 Transcript logs record a mic's window text only when it changes.
@@ -209,7 +209,7 @@ Transcript logs record a mic's window text only when it changes.
 ### Command Configuration
 
 Define aliases for actions, devices, and rooms. An alias is a substring of
-the lowercase transcript, or a compiled regex (`re.compile(...)`) searched in
+the lowercase transcript, or a compiled regex `re.compile(...)` searched in
 it — for what a substring can't say, such as a particle verb split around
 its object ("turn the light on") or a short word that must not match inside
 others ("ac" in "back"):
@@ -268,7 +268,7 @@ also switches off a pump while `turn_on` doesn't. A `"default"` key covers
 the actions not listed.
 
 When a command names no room, it goes to the room of the mic that heard it
-(`source_rooms`), else to `default_room`. A device listed in
+`source_rooms` else to `default_room` A device listed in
 `devices_without_room` is instead looked up across all rooms, so "turn on
 the AC" finds it wherever it is.
 
@@ -378,18 +378,18 @@ This ensures that:
 
 If a USB speakerphone sometimes drops off the bus, a udev rule can restart
 the service (and tell you over Telegram) whenever the device comes back.
-`99-usb-jabra.rules` does this for a Jabra Speak2 40.
+`99-usb-jabra.rules` does this for a Jabra Speak2 40
 
 1. Find your device's vendor and product IDs: unplug and replug it, then
-   run `dmesg | tail` (or `lsusb`) and note `idVendor` / `idProduct`.
+   run `dmesg | tail` or `lsusb` and note `idVendor` / `idProduct`
 2. Set up the notification script and fill in your Telegram bot token and
    chat ID:
    ```
    cp report.sh.sample report.sh
    chmod +x report.sh
    ```
-3. Edit `99-usb-jabra.rules`: put in your `idVendor` / `idProduct` and the
-   path to `report.sh`, then install it:
+3. Edit `99-usb-jabra.rules` put in your `idVendor` / `idProduct` and the
+   path to `report.sh` then install it:
    ```
    sudo cp 99-usb-jabra.rules /etc/udev/rules.d/
    sudo udevadm control --reload-rules
@@ -404,34 +404,34 @@ the service (and tell you over Telegram) whenever the device comes back.
 python run_tests.py
 ```
 
-Runs the command-matching and window-mode tests. They need no `config.py`,
+Runs the command-matching and window-mode tests. They need no `config.py`
 no servers and no audio devices. `tests/test_ai_integration.py` makes a
 real OpenAI call and is skipped unless `config.py` and the `openai` package
 are available.
 
 #### Manual scripts
 
-These run against your real `config.py`:
+These run against your real `config.py`
 
-- `python tests/test_shutdown.py` — starts `main.py`, sends it SIGTERM and
+- `python tests/test_shutdown.py` — starts `main.py` sends it SIGTERM and
   checks that it exits cleanly
-- `python tests/test_tts.py`, `python tests/test_tts_debug.py`,
+- `python tests/test_tts.py` `python tests/test_tts_debug.py`
   `python tests/test_tts_direct.py` — speak test phrases through the TTS
-  server and your speakers (see `tests/TTS_TEST_README.md`)
+  server and your speakers see `tests/TTS_TEST_README.md`
 
 #### Testing Transcription
 
 Send a WAV file to the transcription server, e.g. one saved with
-`SAVE_RECORDINGS_TO_DISK = True`:
+`SAVE_RECORDINGS_TO_DISK = True`
 
 ```
 python transcribe.py recordings/2025/02/27/mic_20250227_101030.wav
 ```
 
-### Controlling an entity from the command line (`ha.py`)
+### Controlling an entity from the command line `ha.py`
 
 `ha.py` is a small helper that calls the Home Assistant REST API using
-the URL and token from `config.py`. Useful when you need to probe which
+the URL and token from `config.py` Useful when you need to probe which
 relay is which (e.g. identifying the two outputs on a dual-relay switch)
 or to script a quick toggle outside the voice pipeline.
 
@@ -446,7 +446,7 @@ or to script a quick toggle outside the voice pipeline.
 ./ha.py climate.office_ac 0
 ```
 
-The entity's domain (`switch`, `light`, `climate`, …) is inferred from
+The entity's domain `switch` `light` `climate` … is inferred from
 the part before the dot, so any entity that supports
 `turn_on`/`turn_off`/`toggle` works.
 
@@ -461,7 +461,7 @@ Examples:
 - "Turn the TV on" (with the particle-verb regexes above)
 
 The room is optional: without one, the command goes to the mic's room
-(`source_rooms`) or `default_room`, and a device in `devices_without_room`
+`source_rooms` or `default_room` and a device in `devices_without_room`
 is found in whichever room has it.
 
 ## Troubleshooting
